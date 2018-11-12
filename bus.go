@@ -3,6 +3,7 @@ package can
 import (
 	"io"
 	"net"
+	"sync"
 )
 
 // Bus represents the CAN bus.
@@ -12,6 +13,7 @@ type Bus struct {
 	rwc ReadWriteCloser
 
 	handler []Handler
+	mu      sync.RWMutex
 }
 
 // NewBusForInterfaceWithName returns a bus from the network interface with name ifaceName.
@@ -56,6 +58,8 @@ func (b *Bus) Disconnect() error {
 
 // Subscribe adds a handler to the bus.
 func (b *Bus) Subscribe(handler Handler) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.handler = append(b.handler, handler)
 }
 
@@ -67,6 +71,8 @@ func (b *Bus) SubscribeFunc(fn HandlerFunc) {
 
 // Unsubscribe removes a handler.
 func (b *Bus) Unsubscribe(handler Handler) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	for i, h := range b.handler {
 		if h == handler {
 			b.handler = append(b.handler[:i], b.handler[i+1:]...)
@@ -83,6 +89,8 @@ func (b *Bus) Publish(frame Frame) error {
 }
 
 func (b *Bus) contains(handler Handler) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	for _, h := range b.handler {
 		if h == handler {
 			return true
@@ -111,7 +119,11 @@ func (b *Bus) publishNextFrame() error {
 }
 
 func (b *Bus) publish(frame Frame) {
-	for _, h := range b.handler {
+	b.mu.RLock()
+	handlers := make([]Handler, len(b.handler))
+	copy(handlers, b.handler)
+	b.mu.RUnlock()
+	for _, h := range handlers {
 		h.Handle(frame)
 	}
 }
