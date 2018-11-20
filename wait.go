@@ -45,6 +45,32 @@ func Wait(bus *Bus, id uint32, timeout time.Duration) <-chan WaitResponse {
 	return ch
 }
 
+// WaitFunc returns a channel, which receives a frame or an error, if the
+// frame with the expected id didn't arrive on time.
+func WaitFunc(bus *Bus, filter func(Frame) bool, timeout time.Duration) <-chan WaitResponse {
+	waiter := waiter{
+		wait: make(chan WaitResponse),
+		bus:  bus,
+	}
+
+	ch := make(chan WaitResponse)
+
+	go func() {
+		select {
+		case resp := <-waiter.wait:
+			ch <- resp
+		case <-time.After(timeout):
+			err := fmt.Errorf("Timeout")
+			ch <- WaitResponse{Frame{}, err}
+		}
+	}()
+
+	waiter.filter = newFuncFilter(filter, &waiter)
+	bus.Subscribe(waiter.filter)
+
+	return ch
+}
+
 func (w *waiter) Handle(frame Frame) {
 	w.bus.Unsubscribe(w.filter)
 	w.wait <- WaitResponse{frame, nil}
