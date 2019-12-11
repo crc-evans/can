@@ -1,9 +1,14 @@
 package can
 
 import (
-	"fmt"
 	"time"
 )
+
+// var ErrTimeout = fmt.Errorf("Timeout")
+
+type ErrTimeout struct{}
+
+func (err *ErrTimeout) Error() string { return "timeout" }
 
 // A WaitResponse encapsulates the response of waiting for a frame.
 type WaitResponse struct {
@@ -34,7 +39,7 @@ func Wait(bus *Bus, id uint32, timeout time.Duration) <-chan WaitResponse {
 		case resp := <-waiter.wait:
 			ch <- resp
 		case <-time.After(timeout):
-			err := fmt.Errorf("Timeout error waiting for %X", id)
+			err := &ErrTimeout{}
 			ch <- WaitResponse{Frame{}, err}
 		}
 	}()
@@ -55,17 +60,19 @@ func WaitFunc(bus *Bus, filter func(Frame) bool, timeout time.Duration) <-chan W
 
 	ch := make(chan WaitResponse)
 
+	waiter.filter = newFuncFilter(filter, &waiter)
+
 	go func() {
 		select {
 		case resp := <-waiter.wait:
 			ch <- resp
 		case <-time.After(timeout):
-			err := fmt.Errorf("Timeout")
+			bus.Unsubscribe(waiter.filter) // must unsubscribe so handler does not match future messages
+			err := &ErrTimeout{}
 			ch <- WaitResponse{Frame{}, err}
 		}
 	}()
 
-	waiter.filter = newFuncFilter(filter, &waiter)
 	bus.Subscribe(waiter.filter)
 
 	return ch
